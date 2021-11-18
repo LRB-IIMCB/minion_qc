@@ -58,6 +58,14 @@ parser <- add_option(parser,
                      dest = 'cores',
                      help="Number of processors to use for the anlaysis (default 1). Only helps when you are analysing more than one sequencing_summary.txt file at a time"
                      )
+                     
+parser <- add_option(parser, 
+                     opt_str = c("-g", "--ggplot_skip"), 
+                     type="logical", 
+                     default=FALSE,
+                     dest = 'ggplot_skip',
+                     help="TRUE or FALSE (default). When TRUE will not produce plots. It makes running faster, but there is a file suitable for MultiQC still produced"
+                     )              
 
 parser <- add_option(parser, 
                      opt_str = c("-s", "--smallfigures"), 
@@ -420,7 +428,7 @@ channel.summary <- function(d){
 }
 
 
-single.flowcell <- function(input.file, output.dir, q=7, base.dir = NA){
+single.flowcell <- function(input.file, output.dir, q=7, base.dir = NA,skip_plots=F){
     # wrapper function to analyse data from a single flowcell
     # input.file is a sequencing_summary.txt file from a 1D run
     # output.dir is the output directory into which to write results
@@ -458,267 +466,269 @@ single.flowcell <- function(input.file, output.dir, q=7, base.dir = NA){
     
     write(as.yaml(summary), out.txt)
     
-    if (mux_int == 0) {
-    	mux_int = max(d$hour)
-    }
-    muxes = seq(from = 0, to = max(d$hour), by = mux_int)
+    if (!skip_plots)  {
+    
+	    if (mux_int == 0) {
+	    	mux_int = max(d$hour)
+	    }
+	    muxes = seq(from = 0, to = max(d$hour), by = mux_int)
 
-    # set up variable sizes
-    if(smallfig == TRUE){ p1m = 0.5 }else{ p1m = 1.0 }
-    if(smallfig == TRUE){ p2m = 0.6 }else{ p2m = 1.0 }
-	
-	
-    # make plots
-    flog.info(paste(sep = "", flowcell, ": plotting length histogram"))
-	p1 = ggplot(d, aes(x = sequence_length_template, fill = Q_cutoff)) +
-			geom_histogram(bins = 300) +
-			scale_x_log10(minor_breaks=log10_minor_break(), breaks = log10_major_break()) +
-			facet_wrap(~Q_cutoff, ncol = 1, scales = "free_y") +
-			theme(text = element_text(size = 15)) +
-			xlab("Read length (bases)") +
-			ylab("Number of reads") +
-			guides(fill=FALSE) + scale_fill_viridis(discrete = TRUE, begin = 0.25, end = 0.75)
-	
-	# Add N50 and mean length on p1
-	if (plot_stat) {	
-		# Extract values to display
-		annotation_df = data.frame(
-				Q_cutoff = c("All reads", q_title),
-				n50 = c(all.reads.summary$N50.length, q10.reads.summary$N50.length),
-				mean = c(all.reads.summary$mean.length, q10.reads.summary$mean.length),
-				n50_math = c(
-						if(all.reads.summary$N50.length > all.reads.summary$mean.length){"+"} else {"-"},
-						if(all.reads.summary$N50.length > q10.reads.summary$mean.length){"+"} else {"-"}
-				),
-				mean_math = c(
-						if(all.reads.summary$N50.length > all.reads.summary$mean.length){"-"} else {"+"},
-						if(all.reads.summary$N50.length > q10.reads.summary$mean.length){"-"} else {"+"}
-				)
-		)
+	    # set up variable sizes
+	    if(smallfig == TRUE){ p1m = 0.5 }else{ p1m = 1.0 }
+	    if(smallfig == TRUE){ p2m = 0.6 }else{ p2m = 1.0 }
 		
-		# Set up labels and their location on p1
-		annotation_text_df = data.frame(
-				Q_cutoff = c("All reads", q_title),
-				n50_label = c(paste("N50", annotation_df[1,2], sep="\n"), paste("N50", annotation_df[2,2], sep="\n")),
-				n50_x = c(eval(parse(text=paste(annotation_df[1,"n50"], annotation_df[1,"n50_math"] , annotation_df[1,"n50"], "*", 0.4))), eval(parse(text=paste(annotation_df[2,"n50"],annotation_df[2, "n50_math"] ,annotation_df[2,"n50"], "*", 0.4)))),
-				mean_label = c(paste("Mean", annotation_df[1,3], sep="\n"), paste("Mean", annotation_df[2,3], sep="\n")),
-				mean_x =  c(eval(parse(text=paste(annotation_df[1,"mean"], annotation_df[1, "mean_math"] , annotation_df[1,"mean"], "*", 0.4))), eval(parse(text=paste(annotation_df[2,"mean"],annotation_df[2, "mean_math"] ,annotation_df[2,"mean"], "*", 0.4))))
-		)
 		
-		# Add lines on p1
-		ylim=max(ggplot_build(p1)$data[[1]]$count)
-		p1 = p1 +
-			geom_vline(data=annotation_df, aes(xintercept = n50), color="black") +
-			geom_vline(data=annotation_df, aes(xintercept = mean), color="black") +
-			geom_text(data = annotation_text_df, mapping = aes(x=n50_x, y=ylim*0.85, label = n50_label)) +
-			geom_text(data = annotation_text_df, mapping = aes(x=mean_x, y=ylim*0.85, label = mean_label))
-	}
-	
-    suppressMessages(ggsave(filename = file.path(output.dir, paste("length_histogram.", plot_format, sep="")), device=plot_format, width = p1m*960/75, height = p1m*960/75, plot = p1)) #
-
-    flog.info(paste(sep = "", flowcell, ": plotting mean Q score histogram"))
-    p2 = ggplot(d, aes(x = mean_qscore_template, fill = Q_cutoff)) + 
-        geom_histogram(bins = 300) + 
-        facet_wrap(~Q_cutoff, ncol = 1, scales = "free_y") + 
-        theme(text = element_text(size = 15)) +
-        xlab("Mean Q score of read") +
-        ylab("Number of reads") +
-        guides(fill=FALSE) + scale_fill_viridis(discrete = TRUE, begin = 0.25, end = 0.75)
-
-	# Add mean Qscore on p2
-	if (plot_stat) {
-		# Extract values to display
-		meanQ_df = data.frame(
-				Q_cutoff = c("All reads", q_title),
-				mean = c(all.reads.summary$mean.q, q10.reads.summary$mean.q),
-				mean_label_x = c(all.reads.summary$mean.q*0.95, q10.reads.summary$mean.q*0.95),
-				mean_label = c(paste("Mean\n", all.reads.summary$mean.q), paste("Mean\n", q10.reads.summary$mean.q))
-		)
+	    # make plots
+	    flog.info(paste(sep = "", flowcell, ": plotting length histogram"))
+		p1 = ggplot(d, aes(x = sequence_length_template, fill = Q_cutoff)) +
+				geom_histogram(bins = 300) +
+				scale_x_log10(minor_breaks=log10_minor_break(), breaks = log10_major_break()) +
+				facet_wrap(~Q_cutoff, ncol = 1, scales = "free_y") +
+				theme(text = element_text(size = 15)) +
+				xlab("Read length (bases)") +
+				ylab("Number of reads") +
+				guides(fill=FALSE) + scale_fill_viridis(discrete = TRUE, begin = 0.25, end = 0.75)
 		
-		# Add line on p2
-		ylim_meanQ=max(ggplot_build(p2)$data[[1]]$count)
-		p2 = p2 +
-			geom_vline(data=meanQ_df, aes(xintercept = mean), color="black") +
-			geom_text(data = meanQ_df, mapping = aes(x=mean_label_x, y=ylim_meanQ*0.95, label = mean_label))
-	}
-	
-    suppressMessages(ggsave(filename = file.path(output.dir, paste("q_histogram.", plot_format, sep="")), device=plot_format, width = p1m*960/75, height = p1m*960/75, plot = p2)) #
-    
-    if(max(d$channel)<=512){
-        # only do this for minion, not promethion
-	    flog.info(paste(sep = "", flowcell, ": plotting flowcell overview"))
-        p3 = ggplot(subset(d, Q_cutoff=="All reads"), aes(x=start_time/3600, y=sequence_length_template, colour = mean_qscore_template)) + 
-            geom_point(size=1.5, alpha=0.35) + 
-            scale_colour_viridis() + 
-            labs(colour='Q')  + 
-            scale_y_log10() + 
-            facet_grid(row~col) +
-            theme(panel.spacing = unit(0.5, "lines")) +
-            xlab("Hours into run") +
-            ylab("Read length") +
-            theme(text = element_text(size = 40), axis.text.x = element_text(size=12), axis.text.y = element_text(size=12), legend.text=element_text(size=18), legend.title=element_text(size=24))
-    
-            suppressMessages(ggsave(filename = file.path(output.dir,  paste("flowcell_overview.", plot_format, sep="")), device=plot_format, width = 2000/75, height = 1920/75, plot = p3))
-    }
+		# Add N50 and mean length on p1
+		if (plot_stat) {	
+			# Extract values to display
+			annotation_df = data.frame(
+					Q_cutoff = c("All reads", q_title),
+					n50 = c(all.reads.summary$N50.length, q10.reads.summary$N50.length),
+					mean = c(all.reads.summary$mean.length, q10.reads.summary$mean.length),
+					n50_math = c(
+							if(all.reads.summary$N50.length > all.reads.summary$mean.length){"+"} else {"-"},
+							if(all.reads.summary$N50.length > q10.reads.summary$mean.length){"+"} else {"-"}
+					),
+					mean_math = c(
+							if(all.reads.summary$N50.length > all.reads.summary$mean.length){"-"} else {"+"},
+							if(all.reads.summary$N50.length > q10.reads.summary$mean.length){"-"} else {"+"}
+					)
+			)
+			
+			# Set up labels and their location on p1
+			annotation_text_df = data.frame(
+					Q_cutoff = c("All reads", q_title),
+					n50_label = c(paste("N50", annotation_df[1,2], sep="\n"), paste("N50", annotation_df[2,2], sep="\n")),
+					n50_x = c(eval(parse(text=paste(annotation_df[1,"n50"], annotation_df[1,"n50_math"] , annotation_df[1,"n50"], "*", 0.4))), eval(parse(text=paste(annotation_df[2,"n50"],annotation_df[2, "n50_math"] ,annotation_df[2,"n50"], "*", 0.4)))),
+					mean_label = c(paste("Mean", annotation_df[1,3], sep="\n"), paste("Mean", annotation_df[2,3], sep="\n")),
+					mean_x =  c(eval(parse(text=paste(annotation_df[1,"mean"], annotation_df[1, "mean_math"] , annotation_df[1,"mean"], "*", 0.4))), eval(parse(text=paste(annotation_df[2,"mean"],annotation_df[2, "mean_math"] ,annotation_df[2,"mean"], "*", 0.4))))
+			)
+			
+			# Add lines on p1
+			ylim=max(ggplot_build(p1)$data[[1]]$count)
+			p1 = p1 +
+				geom_vline(data=annotation_df, aes(xintercept = n50), color="black") +
+				geom_vline(data=annotation_df, aes(xintercept = mean), color="black") +
+				geom_text(data = annotation_text_df, mapping = aes(x=n50_x, y=ylim*0.85, label = n50_label)) +
+				geom_text(data = annotation_text_df, mapping = aes(x=mean_x, y=ylim*0.85, label = mean_label))
+		}
+		
+	    suppressMessages(ggsave(filename = file.path(output.dir, paste("length_histogram.", plot_format, sep="")), device=plot_format, width = p1m*960/75, height = p1m*960/75, plot = p1)) #
 
-    flog.info(paste(sep = "", flowcell, ": plotting flowcell yield over time"))
-    p5 = ggplot(d, aes(x=start_time/3600, y=cumulative.bases.time/1000000000, colour = Q_cutoff)) + 
-        geom_vline(xintercept = muxes, colour = 'red', linetype = 'dashed', alpha = 0.5) +
-        geom_line(size = 1) + 
-        xlab("Hours into run") +
-        ylab("Total yield in gigabases") +
-        scale_colour_viridis(discrete = TRUE, begin = 0.25, end = 0.75, guide = guide_legend(title = "Reads")) +
-        theme(text = element_text(size = 15))
-    suppressMessages(ggsave(filename = file.path(output.dir, paste("yield_over_time.", plot_format, sep="")), device=plot_format, width = p1m*960/75, height = p1m*480/75, plot = p5)) #
+	    flog.info(paste(sep = "", flowcell, ": plotting mean Q score histogram"))
+	    p2 = ggplot(d, aes(x = mean_qscore_template, fill = Q_cutoff)) + 
+		geom_histogram(bins = 300) + 
+		facet_wrap(~Q_cutoff, ncol = 1, scales = "free_y") + 
+		theme(text = element_text(size = 15)) +
+		xlab("Mean Q score of read") +
+		ylab("Number of reads") +
+		guides(fill=FALSE) + scale_fill_viridis(discrete = TRUE, begin = 0.25, end = 0.75)
 
+		# Add mean Qscore on p2
+		if (plot_stat) {
+			# Extract values to display
+			meanQ_df = data.frame(
+					Q_cutoff = c("All reads", q_title),
+					mean = c(all.reads.summary$mean.q, q10.reads.summary$mean.q),
+					mean_label_x = c(all.reads.summary$mean.q*0.95, q10.reads.summary$mean.q*0.95),
+					mean_label = c(paste("Mean\n", all.reads.summary$mean.q), paste("Mean\n", q10.reads.summary$mean.q))
+			)
+			
+			# Add line on p2
+			ylim_meanQ=max(ggplot_build(p2)$data[[1]]$count)
+			p2 = p2 +
+				geom_vline(data=meanQ_df, aes(xintercept = mean), color="black") +
+				geom_text(data = meanQ_df, mapping = aes(x=mean_label_x, y=ylim_meanQ*0.95, label = mean_label))
+		}
+		
+	    suppressMessages(ggsave(filename = file.path(output.dir, paste("q_histogram.", plot_format, sep="")), device=plot_format, width = p1m*960/75, height = p1m*960/75, plot = p2)) #
+	    
+	    if(max(d$channel)<=512){
+		# only do this for minion, not promethion
+		    flog.info(paste(sep = "", flowcell, ": plotting flowcell overview"))
+		p3 = ggplot(subset(d, Q_cutoff=="All reads"), aes(x=start_time/3600, y=sequence_length_template, colour = mean_qscore_template)) + 
+		    geom_point(size=1.5, alpha=0.35) + 
+		    scale_colour_viridis() + 
+		    labs(colour='Q')  + 
+		    scale_y_log10() + 
+		    facet_grid(row~col) +
+		    theme(panel.spacing = unit(0.5, "lines")) +
+		    xlab("Hours into run") +
+		    ylab("Read length") +
+		    theme(text = element_text(size = 40), axis.text.x = element_text(size=12), axis.text.y = element_text(size=12), legend.text=element_text(size=18), legend.title=element_text(size=24))
+	    
+		    suppressMessages(ggsave(filename = file.path(output.dir,  paste("flowcell_overview.", plot_format, sep="")), device=plot_format, width = 2000/75, height = 1920/75, plot = p3))
+	    }
 
-    flog.info(paste(sep = "", flowcell, ": plotting flowcell yield by read length"))
-    p6 = ggplot(d, aes(x=sequence_length_template, y=cumulative.bases/1000000000, colour = Q_cutoff)) + 
-        geom_line(size = 1) + 
-        xlab("Minimum read length (bases)") +
-        ylab("Total yield in gigabases") +
-        scale_colour_viridis(discrete = TRUE, begin = 0.25, end = 0.75, guide = guide_legend(title = "Reads")) +
-        theme(text = element_text(size = 15))
-    xmax = max(d$sequence_length_template[which(d$cumulative.bases > 0.01 * max(d$cumulative.bases))])
-    p6 = p6 + scale_x_continuous(limits = c(0, xmax))
-    suppressMessages(ggsave(filename = file.path(output.dir, paste("yield_by_length.", plot_format, sep="")), device=plot_format, width = p1m*960/75, height = p1m*480/75, plot = p6)) #
-    
-    flog.info(paste(sep = "", flowcell, ": plotting sequence length over time"))
-    p7 = ggplot(d, aes(x=start_time/3600, y=sequence_length_template, colour = Q_cutoff, group = Q_cutoff)) + 
-        geom_vline(xintercept = muxes, colour = 'red', linetype = 'dashed', alpha = 0.5) +
-        theme(text = element_text(size = 15)) +
-        geom_smooth() + 
-        xlab("Hours into run") + 
-        ylab("Mean read length (bases)") + 
-        scale_colour_viridis(discrete = TRUE, begin = 0.25, end = 0.75, guide = guide_legend(title = "Reads")) +
-        ylim(0, NA)
-    suppressMessages(ggsave(filename = file.path(output.dir, paste("length_by_hour.", plot_format, sep="")), device=plot_format, width = p1m*960/75, height = p1m*480/75, plot = p7)) #
-    
-    flog.info(paste(sep = "", flowcell, ": plotting Q score over time"))
-    p8 = ggplot(d, aes(x=start_time/3600, y=mean_qscore_template, colour = Q_cutoff, group = Q_cutoff)) + 
-        geom_vline(xintercept = muxes, colour = 'red', linetype = 'dashed', alpha = 0.5) +
-        theme(text = element_text(size = 15)) +
-        geom_smooth() + 
-        xlab("Hours into run") + 
-        ylab("Mean Q score") + 
-        scale_colour_viridis(discrete = TRUE, begin = 0.25, end = 0.75, guide = guide_legend(title = "Reads")) +
-        ylim(0, NA)
-    suppressMessages(ggsave(filename = file.path(output.dir, paste("q_by_hour.", plot_format, sep="")), device=plot_format, width = p1m*960/75, height = p1m*480/75, plot = p8)) #
-    
-    flog.info(paste(sep = "", flowcell, ": plotting reads per hour"))
-    f = d[c("hour", "reads_per_hour", "Q_cutoff")]
-    f = f[!duplicated(f),]
-    g = subset(f, Q_cutoff=="All reads")
-    h = subset(f, Q_cutoff==q_title)
-    max = max(f$hour)
-    # all of this is just to fill in hours with no reads recorded
-    all = 0:max
-    add.g = all[which(all %in% g$hour == FALSE)]
-    if(length(add.g)>0){
-        add.g = data.frame(hour = add.g, reads_per_hour = 0, Q_cutoff = "All reads")
-        g = rbind(g, add.g)
-    }
-    add.h = all[which(all %in% h$hour == FALSE)]
-    if(length(add.h)>0){
-        add.h = data.frame(hour = add.h, reads_per_hour = 0, Q_cutoff = q_title)
-        h = rbind(h, add.h)
-    }
-    i = rbind(g, h)
-    i$Q_cutoff = as.character(i$Q_cutoff)
-    i$Q_cutoff[which(i$Q_cutoff==q_title)] = paste("Q>=", q, sep="")
-    p9 = ggplot(i, aes(x=hour, y=reads_per_hour, colour = Q_cutoff, group = Q_cutoff)) + 
-        geom_vline(xintercept = muxes, colour = 'red', linetype = 'dashed', alpha = 0.5) +
-        theme(text = element_text(size = 15)) +
-        geom_point() +
-        geom_line() +
-        xlab("Hours into run") + 
-        ylab("Number of reads per hour") + 
-        ylim(0, NA) + 
-        scale_colour_viridis(discrete = TRUE, begin = 0.25, end = 0.75, guide = guide_legend(title = "Reads"))
-    suppressMessages(ggsave(filename = file.path(output.dir, paste("reads_per_hour.", plot_format, sep="")), device=plot_format, width = p1m*960/75, height = p1m*480/75, plot = p9)) #
-    
-    if(max(d$channel)<=512){
-        # minion
-        flog.info(paste(sep = "", flowcell, ": plotting read length vs. q score scatterplot"))
-        p10 = ggplot(subset(d, Q_cutoff=="All reads"), aes(x = sequence_length_template, y = mean_qscore_template, colour = events_per_base)) + 
-            geom_point(alpha=0.05, size = 0.4) + 
-            scale_x_log10(minor_breaks=log10_minor_break(), breaks = log10_major_break()) + 
-            labs(colour='Events per base\n(log scale)\n')  + 
-            theme(text = element_text(size = 15)) +
-            xlab("Read length (bases)") +
-            ylab("Mean Q score of read")
-    }else{
-        # promethion
-        p10 = ggplot(subset(d, Q_cutoff=="All reads"), aes(x = sequence_length_template, y = mean_qscore_template, colour = events_per_base)) + 
-            geom_bin2d() + 
-            scale_x_log10(minor_breaks=log10_minor_break(), breaks = log10_major_break()) + 
-            theme(text = element_text(size = 15)) +
-            scale_fill_viridis() +
-            xlab("Read length (bases)") +
-            ylab("Mean Q score of read")
-    }
-    
-    
-    if(max(d$events_per_base, na.rm=T)>0){
-        # a catch for 1D2 runs which don't have events per base
-        p10 = p10 + scale_colour_viridis(trans = "log", labels = scientific, option = 'inferno') 
-    }
-    # we keep it a bit wider, because the legend takes up a fair bit of the plot space
-    suppressMessages(ggsave(filename = file.path(output.dir, paste("length_vs_q.", plot_format, sep="")), device=plot_format, width = p2m*960/75, height = p1m*960/75, plot = p10)) #
-    
-    flog.info(paste(sep = "", flowcell, ": plotting flowcell channels summary histograms"))
-    c = channel.summary(subset(d, Q_cutoff=="All reads"))
-    c10 = channel.summary(subset(d, Q_cutoff==q_title))
-    c$Q_cutoff = "All reads"
-    c10$Q_cutoff = q_title
-    cc = rbind(c, c10)
-    cc$variable = as.character(cc$variable)
-    cc$variable[which(cc$variable=="total.bases")] = "Number of bases per channel"
-    cc$variable[which(cc$variable=="total.reads")] = "Number of reads per channel"
-    cc$variable[which(cc$variable=="mean.read.length")] = "Mean read length per channel"
-    cc$variable[which(cc$variable=="median.read.length")] = "Median read length per channel"
-    p11 = ggplot(cc, aes(x = value, fill = Q_cutoff)) + geom_histogram(bins = 30) + 
-        facet_grid(Q_cutoff~variable, scales = "free_x") + 
-        theme(text = element_text(size = 15), axis.text.x = element_text(angle = 60, hjust = 1)) +
-        guides(fill=FALSE) +
-        scale_fill_viridis(discrete = TRUE, begin = 0.25, end = 0.75) +
-        guides(fill=FALSE)
-    suppressMessages(ggsave(filename = file.path(output.dir, paste("channel_summary.", plot_format, sep="")), device=plot_format, width = 960/75, height = 480/75, plot = p11)) 
-    
-
-    flog.info(paste(sep = "", flowcell, ": plotting physical overview of output per channel"))
-    if(max(d$channel)<=512){
-        # minion
-        cols = 2
-    }else{
-        # promethion
-        cols = 1
-    }
+	    flog.info(paste(sep = "", flowcell, ": plotting flowcell yield over time"))
+	    p5 = ggplot(d, aes(x=start_time/3600, y=cumulative.bases.time/1000000000, colour = Q_cutoff)) + 
+		geom_vline(xintercept = muxes, colour = 'red', linetype = 'dashed', alpha = 0.5) +
+		geom_line(size = 1) + 
+		xlab("Hours into run") +
+		ylab("Total yield in gigabases") +
+		scale_colour_viridis(discrete = TRUE, begin = 0.25, end = 0.75, guide = guide_legend(title = "Reads")) +
+		theme(text = element_text(size = 15))
+	    suppressMessages(ggsave(filename = file.path(output.dir, paste("yield_over_time.", plot_format, sep="")), device=plot_format, width = p1m*960/75, height = p1m*480/75, plot = p5)) #
 
 
-    p12 = ggplot(subset(cc, variable == "Number of bases per channel"), aes(x = as.numeric(col), y = as.numeric(row))) + 
-        geom_tile(aes(fill = value/1000000000), colour="white", size=0.25) +
-        facet_wrap(~Q_cutoff, ncol = cols) + 
-        theme(text = element_text(size = 15), 
-                plot.background=element_blank(), 
-                panel.border=element_blank(),
-                panel.background = element_blank(),
-                panel.grid.major = element_blank(), 
-                panel.grid.minor = element_blank()) +
-        scale_fill_viridis(name = "GB/channel") +
-        scale_y_continuous(trans = "reverse", expand=c(0,0)) +
-        scale_x_continuous(expand=c(0,0)) +
-        coord_fixed() +
-        labs(x="channel column",y="channel row")
+	    flog.info(paste(sep = "", flowcell, ": plotting flowcell yield by read length"))
+	    p6 = ggplot(d, aes(x=sequence_length_template, y=cumulative.bases/1000000000, colour = Q_cutoff)) + 
+		geom_line(size = 1) + 
+		xlab("Minimum read length (bases)") +
+		ylab("Total yield in gigabases") +
+		scale_colour_viridis(discrete = TRUE, begin = 0.25, end = 0.75, guide = guide_legend(title = "Reads")) +
+		theme(text = element_text(size = 15))
+	    xmax = max(d$sequence_length_template[which(d$cumulative.bases > 0.01 * max(d$cumulative.bases))])
+	    p6 = p6 + scale_x_continuous(limits = c(0, xmax))
+	    suppressMessages(ggsave(filename = file.path(output.dir, paste("yield_by_length.", plot_format, sep="")), device=plot_format, width = p1m*960/75, height = p1m*480/75, plot = p6)) #
+	    
+	    flog.info(paste(sep = "", flowcell, ": plotting sequence length over time"))
+	    p7 = ggplot(d, aes(x=start_time/3600, y=sequence_length_template, colour = Q_cutoff, group = Q_cutoff)) + 
+		geom_vline(xintercept = muxes, colour = 'red', linetype = 'dashed', alpha = 0.5) +
+		theme(text = element_text(size = 15)) +
+		geom_smooth() + 
+		xlab("Hours into run") + 
+		ylab("Mean read length (bases)") + 
+		scale_colour_viridis(discrete = TRUE, begin = 0.25, end = 0.75, guide = guide_legend(title = "Reads")) +
+		ylim(0, NA)
+	    suppressMessages(ggsave(filename = file.path(output.dir, paste("length_by_hour.", plot_format, sep="")), device=plot_format, width = p1m*960/75, height = p1m*480/75, plot = p7)) #
+	    
+	    flog.info(paste(sep = "", flowcell, ": plotting Q score over time"))
+	    p8 = ggplot(d, aes(x=start_time/3600, y=mean_qscore_template, colour = Q_cutoff, group = Q_cutoff)) + 
+		geom_vline(xintercept = muxes, colour = 'red', linetype = 'dashed', alpha = 0.5) +
+		theme(text = element_text(size = 15)) +
+		geom_smooth() + 
+		xlab("Hours into run") + 
+		ylab("Mean Q score") + 
+		scale_colour_viridis(discrete = TRUE, begin = 0.25, end = 0.75, guide = guide_legend(title = "Reads")) +
+		ylim(0, NA)
+	    suppressMessages(ggsave(filename = file.path(output.dir, paste("q_by_hour.", plot_format, sep="")), device=plot_format, width = p1m*960/75, height = p1m*480/75, plot = p8)) #
+	    
+	    flog.info(paste(sep = "", flowcell, ": plotting reads per hour"))
+	    f = d[c("hour", "reads_per_hour", "Q_cutoff")]
+	    f = f[!duplicated(f),]
+	    g = subset(f, Q_cutoff=="All reads")
+	    h = subset(f, Q_cutoff==q_title)
+	    max = max(f$hour)
+	    # all of this is just to fill in hours with no reads recorded
+	    all = 0:max
+	    add.g = all[which(all %in% g$hour == FALSE)]
+	    if(length(add.g)>0){
+		add.g = data.frame(hour = add.g, reads_per_hour = 0, Q_cutoff = "All reads")
+		g = rbind(g, add.g)
+	    }
+	    add.h = all[which(all %in% h$hour == FALSE)]
+	    if(length(add.h)>0){
+		add.h = data.frame(hour = add.h, reads_per_hour = 0, Q_cutoff = q_title)
+		h = rbind(h, add.h)
+	    }
+	    i = rbind(g, h)
+	    i$Q_cutoff = as.character(i$Q_cutoff)
+	    i$Q_cutoff[which(i$Q_cutoff==q_title)] = paste("Q>=", q, sep="")
+	    p9 = ggplot(i, aes(x=hour, y=reads_per_hour, colour = Q_cutoff, group = Q_cutoff)) + 
+		geom_vline(xintercept = muxes, colour = 'red', linetype = 'dashed', alpha = 0.5) +
+		theme(text = element_text(size = 15)) +
+		geom_point() +
+		geom_line() +
+		xlab("Hours into run") + 
+		ylab("Number of reads per hour") + 
+		ylim(0, NA) + 
+		scale_colour_viridis(discrete = TRUE, begin = 0.25, end = 0.75, guide = guide_legend(title = "Reads"))
+	    suppressMessages(ggsave(filename = file.path(output.dir, paste("reads_per_hour.", plot_format, sep="")), device=plot_format, width = p1m*960/75, height = p1m*480/75, plot = p9)) #
+	    
+	    if(max(d$channel)<=512){
+		# minion
+		flog.info(paste(sep = "", flowcell, ": plotting read length vs. q score scatterplot"))
+		p10 = ggplot(subset(d, Q_cutoff=="All reads"), aes(x = sequence_length_template, y = mean_qscore_template, colour = events_per_base)) + 
+		    geom_point(alpha=0.05, size = 0.4) + 
+		    scale_x_log10(minor_breaks=log10_minor_break(), breaks = log10_major_break()) + 
+		    labs(colour='Events per base\n(log scale)\n')  + 
+		    theme(text = element_text(size = 15)) +
+		    xlab("Read length (bases)") +
+		    ylab("Mean Q score of read")
+	    }else{
+		# promethion
+		p10 = ggplot(subset(d, Q_cutoff=="All reads"), aes(x = sequence_length_template, y = mean_qscore_template, colour = events_per_base)) + 
+		    geom_bin2d() + 
+		    scale_x_log10(minor_breaks=log10_minor_break(), breaks = log10_major_break()) + 
+		    theme(text = element_text(size = 15)) +
+		    scale_fill_viridis() +
+		    xlab("Read length (bases)") +
+		    ylab("Mean Q score of read")
+	    }
+	    
+	    
+	    if(max(d$events_per_base, na.rm=T)>0){
+		# a catch for 1D2 runs which don't have events per base
+		p10 = p10 + scale_colour_viridis(trans = "log", labels = scientific, option = 'inferno') 
+	    }
+	    # we keep it a bit wider, because the legend takes up a fair bit of the plot space
+	    suppressMessages(ggsave(filename = file.path(output.dir, paste("length_vs_q.", plot_format, sep="")), device=plot_format, width = p2m*960/75, height = p1m*960/75, plot = p10)) #
+	    
+	    flog.info(paste(sep = "", flowcell, ": plotting flowcell channels summary histograms"))
+	    c = channel.summary(subset(d, Q_cutoff=="All reads"))
+	    c10 = channel.summary(subset(d, Q_cutoff==q_title))
+	    c$Q_cutoff = "All reads"
+	    c10$Q_cutoff = q_title
+	    cc = rbind(c, c10)
+	    cc$variable = as.character(cc$variable)
+	    cc$variable[which(cc$variable=="total.bases")] = "Number of bases per channel"
+	    cc$variable[which(cc$variable=="total.reads")] = "Number of reads per channel"
+	    cc$variable[which(cc$variable=="mean.read.length")] = "Mean read length per channel"
+	    cc$variable[which(cc$variable=="median.read.length")] = "Median read length per channel"
+	    p11 = ggplot(cc, aes(x = value, fill = Q_cutoff)) + geom_histogram(bins = 30) + 
+		facet_grid(Q_cutoff~variable, scales = "free_x") + 
+		theme(text = element_text(size = 15), axis.text.x = element_text(angle = 60, hjust = 1)) +
+		guides(fill=FALSE) +
+		scale_fill_viridis(discrete = TRUE, begin = 0.25, end = 0.75) +
+		guides(fill=FALSE)
+	    suppressMessages(ggsave(filename = file.path(output.dir, paste("channel_summary.", plot_format, sep="")), device=plot_format, width = 960/75, height = 480/75, plot = p11)) 
+	    
 
-    if(max(d$channel)<=512){
-        # minion
-        suppressMessages(ggsave(filename = file.path(output.dir, paste("gb_per_channel_overview.", plot_format, sep="")), device=plot_format, width = 960/150, height = 480/75, plot = p12)) 
-    }else{
-        # promethion
-        suppressMessages(ggsave(filename = file.path(output.dir, paste("gb_per_channel_overview.", plot_format, sep="")), device=plot_format, width = 960/75, height = 480/75, plot = p12))         
+	    flog.info(paste(sep = "", flowcell, ": plotting physical overview of output per channel"))
+	    if(max(d$channel)<=512){
+		# minion
+		cols = 2
+	    }else{
+		# promethion
+		cols = 1
+	    }
+
+
+	    p12 = ggplot(subset(cc, variable == "Number of bases per channel"), aes(x = as.numeric(col), y = as.numeric(row))) + 
+		geom_tile(aes(fill = value/1000000000), colour="white", size=0.25) +
+		facet_wrap(~Q_cutoff, ncol = cols) + 
+		theme(text = element_text(size = 15), 
+		        plot.background=element_blank(), 
+		        panel.border=element_blank(),
+		        panel.background = element_blank(),
+		        panel.grid.major = element_blank(), 
+		        panel.grid.minor = element_blank()) +
+		scale_fill_viridis(name = "GB/channel") +
+		scale_y_continuous(trans = "reverse", expand=c(0,0)) +
+		scale_x_continuous(expand=c(0,0)) +
+		coord_fixed() +
+		labs(x="channel column",y="channel row")
+
+	    if(max(d$channel)<=512){
+		# minion
+		suppressMessages(ggsave(filename = file.path(output.dir, paste("gb_per_channel_overview.", plot_format, sep="")), device=plot_format, width = 960/150, height = 480/75, plot = p12)) 
+	    }else{
+		# promethion
+		suppressMessages(ggsave(filename = file.path(output.dir, paste("gb_per_channel_overview.", plot_format, sep="")), device=plot_format, width = 960/75, height = 480/75, plot = p12))         
+	    }
     }
-    
     return(d)
 }
 
@@ -808,7 +818,7 @@ multi.flowcell = function(input.file, output.base, q){
     # wrapper function to allow parallelisation of single-flowcell 
     # analyses when >1 flowcell is analysed in one run
     
-    d = single.flowcell(input.file, output.dir, q)
+    d = single.flowcell(input.file, output.dir, q,skip_plots=ggplot_skip)
     return(d)
     
 }
@@ -897,7 +907,7 @@ multi.plots = function(dm, output.dir){
 
 if(file_test("-f", input.file)==TRUE & length(test.file)>1){
     # if it's an existing file (not a folder) just run one analysis
-    d = single.flowcell(input.file, output.dir, q)
+    d = single.flowcell(input.file, output.dir, q,skip_plots=ggplot_skip)
 }else if(file_test("-d", input.file)==TRUE & length(test.file)>1){
     # it's a directory, recursively analyse all sequencing_summary.txt files
   
@@ -923,7 +933,7 @@ if(file_test("-f", input.file)==TRUE & length(test.file)>1){
     
     # if the user passes a directory with only one sequencing_summary.txt file...
     if(length(summaries) == 1){
-        d = single.flowcell(summaries[1], output.dir, q)
+        d = single.flowcell(summaries[1], output.dir, q,skip_plots=ggplot_skip)
         flog.info('**** Analysis complete ****')
     }else{
         # analyse each one and keep the returns in a list

@@ -904,10 +904,22 @@ if(file_test("-f", input.file)==TRUE & length(test.file)>1){
     # get a list of all sequencing_summary.txt files, recursively
     summaries = list.files(path = input.file, pattern = "sequencing_summary.txt", recursive = TRUE, full.names = TRUE)
 
+	is.symlink <- function(paths) isTRUE(nzchar(Sys.readlink(paths), keepNA=TRUE))
+
+    for (summary_test in summaries) 
+    {
+    	if (is.symlink(summary_test)) {
+    		#print(summary_test)
+    		summaries <- summaries[summaries != summary_test]
+    	}
+    }
+
+
     flog.info("")
     flog.info("**** Analysing the following files ****")
     flog.info(summaries)
 
+    
     
     # if the user passes a directory with only one sequencing_summary.txt file...
     if(length(summaries) == 1){

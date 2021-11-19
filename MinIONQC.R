@@ -66,6 +66,14 @@ parser <- add_option(parser,
                      dest = 'ggplot_skip',
                      help="TRUE or FALSE (default). When TRUE will not produce plots. It makes running faster, but there is a file suitable for MultiQC still produced"
                      )              
+                     
+parser <- add_option(parser, 
+                     opt_str = c("-r", "--rna"), 
+                     type="logical", 
+                     default=FALSE,
+                     dest = 'rna_data',
+                     help="TRUE or FALSE (default). When TRUE will produce plots relevant for the dirct RNA run (shorter reads). "
+                     )              
 
 parser <- add_option(parser, 
                      opt_str = c("-s", "--smallfigures"), 
@@ -128,7 +136,8 @@ smallfig = opt$smallfig
 combined_only = opt$combined_only
 plot_stat = opt$plot_stat
 mux_int = opt$muxscan
-
+ggplot_skip = opt$ggplot_skip
+rna_data = opt$rna_data
 if (opt$plot_format %in% c('png', 'pdf', 'ps', 'jpeg', 'tiff', 'bmp')){
     plot_format = opt$plot_format
 }else {
@@ -352,7 +361,7 @@ binSearch <- function(min, max, df, t = 100000) {
 }
 
 
-summary.stats <- function(d, Q_cutoff="All reads"){
+summary.stats <- function(d, Q_cutoff="All reads",rna=F){
     # Calculate summary stats for a single value of min.q
     
     rows = which(as.character(d$Q_cutoff)==Q_cutoff)
@@ -375,29 +384,50 @@ summary.stats <- function(d, Q_cutoff="All reads"){
     }else{
         ultra.gigabases = 0
     }
-        
-    reads = list(
-                reads.gt(d, 10000), 
-                reads.gt(d, 20000), 
-                reads.gt(d, 50000),
-                reads.gt(d, 100000),
-                reads.gt(d, 200000),
-                reads.gt(d, 500000),
-                reads.gt(d, 1000000),
-                ultra.reads)
-    names(reads) = c(">10kb", ">20kb", ">50kb", ">100kb", ">200kb", ">500kb", ">1m", "ultralong")
+    if (rna) {
+	reads = list(
+		reads.gt(d, 100), 
+		reads.gt(d, 200), 
+		reads.gt(d, 500),
+		reads.gt(d, 1000),
+		reads.gt(d, 2000),
+		reads.gt(d, 5000),
+		reads.gt(d, 10000))
+	names(reads) = c(">100bp", ">200bp", ">500bp", ">1kb", ">2kb", ">5kb", ">10kb")
 
-    bases = list(
-                bases.gt(d, 10000)/1000000000, 
-                bases.gt(d, 20000)/1000000000, 
-                bases.gt(d, 50000)/1000000000,
-                bases.gt(d, 100000)/1000000000,
-                bases.gt(d, 200000)/1000000000,
-                bases.gt(d, 500000)/1000000000,
-                bases.gt(d, 1000000)/1000000000,
-                ultra.gigabases)
-    names(bases) = c(">10kb", ">20kb", ">50kb", ">100kb", ">200kb", ">500kb", ">1m", "ultralong")
-    
+	bases = list(
+		bases.gt(d, 100)/1000000000, 
+		bases.gt(d, 200)/1000000000, 
+		bases.gt(d, 500)/1000000000,
+		bases.gt(d, 1000)/1000000000,
+		bases.gt(d, 2000)/1000000000,
+		bases.gt(d, 5000)/1000000000,
+		bases.gt(d, 10000)/1000000000)
+	names(bases) = c(">100bp", ">200bp", ">500bp", ">1kb", ">2kb", ">5kb", ">10kb")
+    }
+    else {   
+	    reads = list(
+		        reads.gt(d, 10000), 
+		        reads.gt(d, 20000), 
+		        reads.gt(d, 50000),
+		        reads.gt(d, 100000),
+		        reads.gt(d, 200000),
+		        reads.gt(d, 500000),
+		        reads.gt(d, 1000000),
+		        ultra.reads)
+	    names(reads) = c(">10kb", ">20kb", ">50kb", ">100kb", ">200kb", ">500kb", ">1m", "ultralong")
+
+	    bases = list(
+		        bases.gt(d, 10000)/1000000000, 
+		        bases.gt(d, 20000)/1000000000, 
+		        bases.gt(d, 50000)/1000000000,
+		        bases.gt(d, 100000)/1000000000,
+		        bases.gt(d, 200000)/1000000000,
+		        bases.gt(d, 500000)/1000000000,
+		        bases.gt(d, 1000000)/1000000000,
+		        ultra.gigabases)
+	    names(bases) = c(">10kb", ">20kb", ">50kb", ">100kb", ">200kb", ">500kb", ">1m", "ultralong")
+    }    
     return(list('total.gigabases' = total.bases/1000000000,
                 'total.reads' = total.reads,
                 'N50.length' = N50.length, 
@@ -446,7 +476,7 @@ single.flowcell <- function(input.file, output.dir, q=7, base.dir = NA,skip_plot
         output.dir = file.path(dirname(input.file))
     } else {
         # the user supplied an output dir
-        output.dir = file.path(opt$output.dir, flowcell)
+        output.dir = file.path(opt$output.dir)
     }
     
     flog.info(paste(sep = "", flowcell, ": creating output directory:", output.dir))
@@ -454,8 +484,8 @@ single.flowcell <- function(input.file, output.dir, q=7, base.dir = NA,skip_plot
     out.txt = file.path(output.dir, "summary.yaml")
     
     flog.info(paste(sep = "", flowcell, ": summarising input file for flowcell"))
-    all.reads.summary = summary.stats(d, Q_cutoff = "All reads")
-    q10.reads.summary = summary.stats(d, Q_cutoff = q_title)
+    all.reads.summary = summary.stats(d, Q_cutoff = "All reads",rna=rna_data)
+    q10.reads.summary = summary.stats(d, Q_cutoff = q_title,rna=rna_data)
     
     summary = list("input file" = input.file,
                    "All reads" = all.reads.summary,
@@ -757,8 +787,8 @@ combined.flowcell <- function(d, output.dir, q=8){
     d1$Q_cutoff = as.factor(d1$Q_cutoff)
     d2$Q_cutoff = as.factor(d2$Q_cutoff)
     
-    all.reads.summary = summary.stats(d1, Q_cutoff = "All reads")
-    q10.reads.summary = summary.stats(d2, Q_cutoff = q_title)
+    all.reads.summary = summary.stats(d1, Q_cutoff = "All reads",rna=rna_data)
+    q10.reads.summary = summary.stats(d2, Q_cutoff = q_title,rna=rna_data)
     
     summary = list("input file" = input.file,
                    "All reads" = all.reads.summary,
